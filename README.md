@@ -1,5 +1,7 @@
 # gitknown
 
+[![CI](https://github.com/denisraison/gitknown/actions/workflows/ci.yml/badge.svg)](https://github.com/denisraison/gitknown/actions/workflows/ci.yml)
+
 One web page that aggregates uncommitted + unpushed git changes across every
 repo and worktree under a set of roots, so you can review work-in-progress
 (e.g. what Claude Code is doing across many checkouts) on the fly, before any

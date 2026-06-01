@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same ref makes in-flight runs pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Nix gives CI the exact toolchain the flake pins (go 1.26, node,
+      # golangci-lint built with go1.26, just), so CI runs the same `just verify`
+      # the dev shell and pre-push hook run, no version drift.
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ hashFiles('web/package-lock.json') }}
+          restore-keys: npm-
+
+      - name: Install frontend deps
+        run: nix develop --command just deps
+
+      - name: Verify (frontend build + lint + tests + go build)
+        run: nix develop --command just verify

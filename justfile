@@ -11,9 +11,13 @@ default:
 deps:
     cd web && npm install
 
-# Build the frontend, then the single embedding binary.
-build:
+# Build the frontend bundle. The Go binary embeds web/dist via //go:embed, so
+# this must exist before any go build/test/lint compiles the package.
+web:
     cd web && npm run build
+
+# Build the frontend, then the single embedding binary.
+build: web
     go build -o gitknown .
 
 # Build, then run against {{roots}} on {{addr}}.
@@ -80,8 +84,10 @@ fix:
     gofmt -w *.go
     cd web && npm run fix
 
-# Full gate before pushing: lint + tests + both builds (pre-push runs this).
-verify: lint test build
+# Full gate (pre-push and CI run this): frontend build first so //go:embed has
+# files to embed, then lint + tests + the embedding build. Self-contained, so it
+# passes on a clean checkout where web/dist doesn't exist yet.
+verify: web lint test build
     @echo "verify: all checks passed"
 
 # Install lefthook-managed git hooks (see lefthook.yml). One-time per clone.
