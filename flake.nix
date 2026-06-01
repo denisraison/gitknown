@@ -75,15 +75,15 @@
         # per-platform sha256s: `just release-hashes v<X.Y.Z>` prints these lines.
         # Only the platforms the release targets appear; others fall back to the
         # source build above.
-        binVersion = "0.1.0";
+        binVersion = "0.2.0";
         binAssets = {
           x86_64-linux = {
             arch = "linux-amd64";
-            sha256 = "273717472bf0b680f3eb88f1062b2436a4e8b0d6a72f8aa4666ca46fd3e96dc7";
+            sha256 = "eece87e7873d892fcb02069606618d0adeb7b28e78751def3575a643dfd14526";
           };
           aarch64-darwin = {
             arch = "darwin-arm64";
-            sha256 = "6e653aad2123b8377b21b8062f6f6dacd114c3cf44949f1fe6ba7358778e9796";
+            sha256 = "0e5eda40b8cf9609808f314d0271cf5465475efad191a7e1a9cecc30eafeacdd";
           };
         };
         binAsset = binAssets.${system} or null;
