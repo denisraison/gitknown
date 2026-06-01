@@ -59,9 +59,21 @@ export interface RepoTree {
 export const fetchTree = (id: string): Promise<RepoTree> =>
   fetch(`/api/repos/${id}/tree`).then(json);
 
-// subscribeChanges streams repo ids that changed on disk. Returns unsubscribe.
-export const subscribeChanges = (onChanged: (repoId: string) => void): (() => void) => {
+// subscribeChanges streams repo ids that changed on disk. onReconnect fires when
+// the stream re-opens after a drop (backend restart, sleep, network blip): events
+// during the gap are lost, so the caller must resync state. Returns unsubscribe.
+export const subscribeChanges = (
+  onChanged: (repoId: string) => void,
+  onReconnect: () => void,
+): (() => void) => {
   const es = new EventSource("/api/events");
+  let opened = false;
+  es.addEventListener("open", () => {
+    if (opened) {
+      onReconnect();
+    }
+    opened = true; // first open is the initial connect; later ones are reconnects
+  });
   es.addEventListener("changed", (e) => onChanged((e as MessageEvent).data));
   return () => es.close();
 };

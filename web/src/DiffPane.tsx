@@ -1,13 +1,15 @@
 import { createEffect, onCleanup } from "solid-js";
-import { FileDiff } from "@pierre/diffs";
+import { File, FileDiff } from "@pierre/diffs";
 import { fetchFileDiff, fetchFileView, type FileEntry } from "./api";
 
-// DiffPane wraps the imperative @pierre/diffs core. Solid components run once,
-// so we own the FileDiff instance directly: rebuild it when the target file
-// changes, clean it up on unmount. No reconciliation fights the widget.
+const THEME = { dark: "pierre-dark", light: "pierre-light" };
+
+// DiffPane wraps the imperative @pierre/diffs viewers. Solid components run once,
+// so we own the instance directly: rebuild it when the target file changes,
+// clean it up on unmount. No reconciliation fights the widget.
 export function DiffPane(props: { repoId?: string | undefined; file?: FileEntry | undefined }) {
   let container!: HTMLDivElement;
-  let instance: FileDiff | undefined;
+  let instance: File | FileDiff | undefined;
 
   createEffect(() => {
     const repoId = props.repoId;
@@ -17,23 +19,30 @@ export function DiffPane(props: { repoId?: string | undefined; file?: FileEntry 
       instance = undefined;
       return;
     }
-    // Empty status = an unchanged context file (from "all files" mode): no
-    // diff exists, fetch its plain contents and render it as a no-op diff.
-    const load =
-      file.status === ""
-        ? fetchFileView(repoId, file.path)
-        : fetchFileDiff(repoId, file.path, file.status);
-    load.then((d) => {
-      instance?.cleanUp();
-      instance = new FileDiff({
-        theme: { dark: "pierre-dark", light: "pierre-light" },
-        diffStyle: "split",
+    // Empty status = an unchanged context file (from "all files" mode): there is
+    // no diff, so render it with the plain File viewer. Routing it through
+    // FileDiff with identical old/new produces zero hunks and shows nothing.
+    if (file.status === "") {
+      fetchFileView(repoId, file.path).then((d) => {
+        instance?.cleanUp();
+        const f = new File({ theme: THEME });
+        f.render({
+          file: { name: file.path, contents: d.newContents },
+          containerWrapper: container,
+        });
+        instance = f;
       });
-      instance.render({
+      return;
+    }
+    fetchFileDiff(repoId, file.path, file.status).then((d) => {
+      instance?.cleanUp();
+      const fd = new FileDiff({ theme: THEME, diffStyle: "split" });
+      fd.render({
         oldFile: { name: file.path, contents: d.oldContents },
         newFile: { name: file.path, contents: d.newContents },
         containerWrapper: container,
       });
+      instance = fd;
     });
   });
 

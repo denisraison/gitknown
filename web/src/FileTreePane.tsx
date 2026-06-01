@@ -2,13 +2,22 @@ import { createEffect, onCleanup, Show } from "solid-js";
 import { FileTree } from "@pierre/trees";
 import { TREE_STATUS, type FileEntry } from "./api";
 
+// sameFiles reports whether two change sets are identical in path + status, so
+// the tree only rebuilds when the displayed set actually changed.
+function sameFiles(a: FileEntry[], b: FileEntry[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((x, i) => x.path === b[i]?.path && x.status === b[i]?.status);
+}
+
 // changedDirs collects every ancestor directory of the changed files, so "all
 // files" mode can start collapsed yet expand the folders that contain changes.
 function changedDirs(files: FileEntry[]): string[] {
   const dirs = new Set<string>();
   for (const f of files) {
     const parts = f.path.split("/");
-    parts.pop(); // drop the filename
+    parts.pop();
     let acc = "";
     for (const part of parts) {
       acc = acc ? `${acc}/${part}` : part;
@@ -18,11 +27,9 @@ function changedDirs(files: FileEntry[]): string[] {
   return [...dirs];
 }
 
-// FileTreePane wraps the imperative @pierre/trees core. Rebuilds the tree when
-// the file set (or mode) changes; reports selection back up via onSelect.
-// "changes" mode shows only the change set; "all files" mode shows the whole
-// repo with the changed files still badged. Unchanged files report status ""
-// so the caller knows to fetch a plain view instead of a diff.
+// Wraps the imperative @pierre/trees core. "all files" mode shows the whole repo
+// with changed files badged; its unchanged files carry status "" so the caller
+// fetches a plain view instead of a diff.
 export function FileTreePane(props: {
   files: FileEntry[];
   allPaths?: string[] | undefined;
@@ -33,11 +40,21 @@ export function FileTreePane(props: {
 }) {
   let container!: HTMLDivElement;
   let tree: FileTree | undefined;
+  let last: { files: FileEntry[]; all: string[] | undefined; showAll: boolean } | undefined;
 
   createEffect(() => {
     const files = props.files;
     const all = props.allPaths;
-    const useAll = props.showAll && !!all && all.length > 0;
+    const showAll = props.showAll;
+    // The effect re-runs on any tab change (selecting a file replaces the tab
+    // object), but the tree only needs rebuilding when the displayed set changes
+    // — otherwise a mere selection would collapse the user's expansion. allPaths
+    // is stable by reference except on toggle/tab-switch, so compare it directly.
+    if (last && last.all === all && last.showAll === showAll && sameFiles(last.files, files)) {
+      return;
+    }
+    last = { files, all, showAll };
+    const useAll = showAll && !!all && all.length > 0;
     tree?.cleanUp();
 
     const changed = new Map(files.map((f) => [f.path, f]));

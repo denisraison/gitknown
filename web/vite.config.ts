@@ -10,7 +10,7 @@ export default defineConfig({
   build: { outDir: "dist", emptyOutDir: true },
   server: {
     proxy: {
-      "/api": { target: backend, changeOrigin: true, ws: false },
+      "/api": { target: backend, changeOrigin: true },
     },
   },
 });

@@ -31,8 +31,99 @@ body {
 
 .app {
   display: grid;
-  grid-template-columns: 280px 280px 1fr;
+  grid-template-columns: 280px 1fr;
   height: 100%;
+}
+
+/* The workspace holds the tab strip above the tree + diff panes. */
+.workspace {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tabs {
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  border-right: 1px solid var(--border);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  background: #1c2128;
+}
+
+.tab.active {
+  color: var(--fg);
+  background: var(--bg);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.tab-name {
+  font-weight: 600;
+}
+
+.tab-badge {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 10px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+.tab-close {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.tab-close:hover {
+  color: var(--fg);
+}
+
+.panes {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 280px 5px 1fr; /* overridden inline: treeWidth | resizer | diff */
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Draggable divider between the tree and diff panes; it is the visual border, so
+   the tree pane drops its own right border to avoid doubling up. */
+.resizer {
+  cursor: col-resize;
+  background: var(--border);
+}
+
+.resizer:hover,
+.resizer:active {
+  background: var(--accent);
+}
+
+.panes .tree-pane {
+  border-right: none;
 }
 
 .repos,
@@ -107,6 +198,11 @@ body {
 
 .repo:hover {
   background: #1c2128;
+}
+
+/* Open-as-a-tab but not the focused one: a faint left marker. */
+.repo.open {
+  box-shadow: inset 2px 0 0 var(--fg-muted);
 }
 
 .repo.active {
