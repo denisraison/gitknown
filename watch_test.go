@@ -102,6 +102,45 @@ func TestWatchDiscoversNewRepo(t *testing.T) {
 	}
 }
 
+// TestWatchDropsRemovedRepo: a repo/worktree removed from disk while running
+// must be dropped from the store, not linger as a phantom (stale count, empty
+// tree). Its own deletion events map back to it via repoFor, so removal never
+// trips the .git rescan gate; the watcher must detect the vanished path itself.
+func TestWatchDropsRemovedRepo(t *testing.T) {
+	repo, st, h, ch := startWatched(t)
+	defer h.remove(ch)
+	root := filepath.Dir(repo)
+
+	// A second repo under the same root, with a change so it's dirty.
+	extra := filepath.Join(root, "extra")
+	mustGitRepo(t, extra)
+	write(t, filepath.Join(extra, "new.txt"), "hi\n")
+	want := idFor(extra)
+	if !recvMatch(ch, want, recvTimeout) {
+		t.Fatal("second repo was not discovered/broadcast")
+	}
+	if _, ok := st.get(want); !ok {
+		t.Fatalf("repo %q absent from store before removal", want)
+	}
+
+	// Remove it from disk; the watcher must drop it from the store. Removal is
+	// eventually-consistent (a mid-deletion change can broadcast before the dir
+	// is fully gone), so poll the store rather than asserting on one broadcast.
+	if err := os.RemoveAll(extra); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(recvTimeout)
+	for {
+		if _, ok := st.get(want); !ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("removed repo %q still in store (phantom)", want)
+		}
+		recv(ch, 100*time.Millisecond) // drain broadcasts while waiting
+	}
+}
+
 // recvMatch waits up to total for a broadcast carrying want, tolerating (and
 // discarding) broadcasts for other repos in between.
 func recvMatch(ch chan string, want string, total time.Duration) bool {

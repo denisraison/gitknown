@@ -154,10 +154,20 @@ func watch(ctx context.Context, st *store, h *hub, debounce time.Duration) {
 				rebuild()
 				primeNew(true)
 			}
+			var gone []string
 			for id := range pending {
 				delete(pending, id)
 				r, ok := st.get(id)
 				if !ok {
+					continue
+				}
+				// The working tree vanished (worktree removed / repo deleted).
+				// Its own child-deletion events still map back to it via repoFor,
+				// so removal never trips the .git rescan gate above; without this
+				// it would linger as a phantom (stale count, empty tree). Drop it
+				// and nudge clients to reload the repo list.
+				if _, err := os.Stat(r.Path); err != nil {
+					gone = append(gone, id)
 					continue
 				}
 				sig := statusSignature(r.Path, r.Base)
@@ -166,6 +176,14 @@ func watch(ctx context.Context, st *store, h *hub, debounce time.Duration) {
 					h.broadcast(id)
 				}
 				last[id] = sig
+			}
+			if len(gone) > 0 {
+				st.refresh()
+				rebuild()
+				for _, id := range gone {
+					delete(last, id)
+					h.broadcast(id)
+				}
 			}
 		}
 	}
