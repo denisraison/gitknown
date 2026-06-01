@@ -71,10 +71,10 @@
         # publishes a per-platform tarball with the real git-tag version stamped
         # in, so `nix run github:denisraison/gitknown` fetches that exact binary
         # with no source rebuild (and no Linux build-from-source autoPatchelf
-        # concerns). After cutting a release, bump binVersion and refresh the
-        # per-platform sha256s: `just release-hashes v<X.Y.Z>` prints these lines.
-        # Only the platforms the release targets appear; others fall back to the
-        # source build above.
+        # concerns). release.yml auto-commits this bump to main after each
+        # release; `just release-hashes v<X.Y.Z>` regenerates the values for a
+        # manual fix. Only the platforms the release targets appear; others fall
+        # back to the source build above.
         binVersion = "0.2.0";
         binAssets = {
           x86_64-linux = {

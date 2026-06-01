@@ -53,6 +53,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main # the flake bump below lands on the branch, not the tagged commit
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -65,3 +69,44 @@ jobs:
             artifacts/gitknown-*.tar.gz
             artifacts/gitknown-*.tar.gz.sha256
           generate_release_notes: true
+
+      # Point the flake's prebuilt binary-distribution output at this release so
+      # `nix run github:denisraison/gitknown` serves it. Version + checksums come
+      # straight from the artifacts built above, so the bump is mechanical; we
+      # commit it directly to main (no PR: nothing to review on a generated bump,
+      # and a GITHUB_TOKEN PR wouldn't trigger CI to gate an auto-merge anyway).
+      - name: Track this release in the flake
+        run: |
+          python3 - <<'PY'
+          import os, re, pathlib
+          ref = os.environ["GITHUB_REF_NAME"]          # e.g. v0.2.0
+          version = ref.removeprefix("v")
+          art = pathlib.Path("artifacts")
+          shas = {
+              arch: (art / f"gitknown-{ref}-{arch}.tar.gz.sha256").read_text().split()[0]
+              for arch in ("linux-amd64", "darwin-arm64")
+          }
+          flake = pathlib.Path("flake.nix")
+          s = flake.read_text()
+          s, n = re.subn(r'(binVersion = ")[^"]*(")', rf'\g<1>{version}\g<2>', s)
+          assert n == 1, f"binVersion: matched {n}, expected 1"
+          for arch, sha in shas.items():
+              s, n = re.subn(
+                  rf'(arch = "{arch}";\s*\n\s*sha256 = ")[0-9a-f]{{64}}(")',
+                  rf'\g<1>{sha}\g<2>', s)
+              assert n == 1, f"{arch} sha: matched {n}, expected 1"
+          flake.write_text(s)
+          print(f"flake.nix now tracks {version}: {shas}")
+          PY
+
+      - name: Commit the bump to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add flake.nix
+          if git diff --cached --quiet; then
+            echo "flake already tracks ${GITHUB_REF_NAME}; nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore(flake): point prebuilt output at ${GITHUB_REF_NAME}"
+          git push origin HEAD:main
