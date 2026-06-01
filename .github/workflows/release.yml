@@ -1,0 +1,67 @@
+name: Release
+
+# Cut a release by pushing a version tag: `git tag v0.1.0 && git push origin v0.1.0`.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the release and upload binaries
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            os: linux
+            arch: amd64
+          - runner: macos-15-intel # Intel
+            os: darwin
+            arch: amd64
+          - runner: macos-latest # Apple Silicon
+            os: darwin
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same flake toolchain as dev + CI, so the released binary is built the
+      # way `just build` builds it locally (incl. the darwin cgo/FSEvents path).
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Build frontend + embedding binary
+        run: |
+          nix develop --command just deps
+          nix develop --command just build
+
+      - name: Package
+        run: |
+          name="gitknown-${GITHUB_REF_NAME}-${{ matrix.os }}-${{ matrix.arch }}"
+          tar -czf "${name}.tar.gz" gitknown
+          shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            gitknown-*.tar.gz
+            gitknown-*.tar.gz.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/gitknown-*.tar.gz
+            artifacts/gitknown-*.tar.gz.sha256
+          generate_release_notes: true
