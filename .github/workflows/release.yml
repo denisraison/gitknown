@@ -23,6 +23,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need the tag history so `just build`'s `git describe` stamps the version
 
       # Same flake toolchain as dev + CI, so the released binary is built the
       # way `just build` builds it locally (incl. the darwin cgo/FSEvents path).
@@ -32,6 +34,7 @@ jobs:
         run: |
           nix develop --command just deps
           nix develop --command just build
+          echo "built version: $(./gitknown --version)"
 
       - name: Package
         run: |

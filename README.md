@@ -32,6 +32,19 @@ branch's upstream — or `origin/main`/`master` when there's no upstream. That
 means you see everything *this* branch added (unpushed commits + staged +
 unstaged + untracked) and never changes the base advanced past you.
 
+## Install
+
+Each release publishes prebuilt, tagged binaries (linux-amd64, darwin-arm64),
+each with a `.sha256`, on the [releases page](https://github.com/denisraison/gitknown/releases).
+With nix you can run the latest published release directly, no clone or build:
+
+```sh
+nix run github:denisraison/gitknown -- --roots ~/work
+```
+
+That pulls the prebuilt release binary. To build from source instead (e.g. an
+unreleased commit), use `nix build github:denisraison/gitknown#gitknown`.
+
 ## Setup
 
 Toolchain is pinned via a nix flake (`go`, `nodejs`, `just`, `golangci-lint`,

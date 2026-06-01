@@ -3,6 +3,11 @@
 roots := env_var_or_default("ROOTS", env_var("HOME") / "workspace")
 addr := env_var_or_default("ADDR", "127.0.0.1:8484")
 
+# Version stamped into the binary. `git describe` yields the exact tag on a
+# release checkout (e.g. v0.2.0), `<tag>-<n>-g<sha>` between tags, or the bare
+# sha; "dev" outside a git tree. The release CI just checks out the tag.
+version := `git describe --tags --always --dirty 2>/dev/null || echo dev`
+
 # List recipes.
 default:
     @just --list
@@ -16,9 +21,9 @@ deps:
 web:
     cd web && npm run build
 
-# Build the frontend, then the single embedding binary.
+# Build the frontend, then the single embedding binary, version stamped in.
 build: web
-    go build -o gitknown .
+    go build -ldflags "-X main.version={{version}}" -o gitknown .
 
 # Build, then run against {{roots}} on {{addr}}.
 run: build
@@ -95,6 +100,19 @@ install-hooks:
     -git config --unset core.hooksPath
     lefthook install
     @echo "hooks installed: pre-commit (lint/fmt/typecheck) + pre-push (verify)"
+
+# Print the flake's binAssets sha256 lines for a published release, to paste
+# into flake.nix (and bump binVersion) so `nix run` serves the prebuilt binary.
+# Usage: just release-hashes v0.1.0  (run after the release workflow finishes).
+release-hashes version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base="https://github.com/denisraison/gitknown/releases/download/{{version}}"
+    for pair in x86_64-linux:linux-amd64 aarch64-darwin:darwin-arm64; do
+        sys="${pair%%:*}"; arch="${pair##*:}"
+        sha=$(curl -sfL "$base/gitknown-{{version}}-$arch.tar.gz.sha256" | cut -d' ' -f1)
+        printf '  %s = { arch = "%s"; sha256 = "%s"; };\n' "$sys" "$arch" "$sha"
+    done
 
 # Remove build artifacts.
 clean:

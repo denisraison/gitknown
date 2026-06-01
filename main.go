@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"flag"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -19,12 +20,23 @@ import (
 //go:embed all:web/dist
 var embedded embed.FS
 
+// version is stamped at build time via -ldflags "-X main.version=...". `just
+// build` sets it from `git describe --tags`; the default marks an unstamped
+// (e.g. plain `go build`) binary.
+var version = "dev"
+
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8484", "listen address (localhost only by default)")
 	rootsArg := flag.String("roots", "", "comma-separated dirs to scan (default: cwd)")
 	webDir := flag.String("web", "", "serve frontend from this dir instead of the embedded build (dev)")
 	debounce := flag.Duration("debounce", 200*time.Millisecond, "coalesce window for filesystem change events")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	roots := splitRoots(*rootsArg)
 	st := newStore(roots)
