@@ -1,0 +1,45 @@
+# Strict backend lint. Headline goal: no silently-dropped errors.
+# golangci-lint v2 schema. Run: `just lint-go` (or `golangci-lint run`).
+version: "2"
+
+linters:
+  # standard = errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  enable:
+    - errorlint      # correct error wrapping (%w, errors.Is/As)
+    - bodyclose      # HTTP response bodies are closed
+    - noctx          # no HTTP requests without a context
+    - gosec          # security: path traversal, etc.
+    - unconvert      # no redundant type conversions
+    - prealloc       # preallocate slices in loops where it helps
+    - makezero       # no append to a non-zero-initialized slice
+    - wastedassign   # no assignments never read
+    - nilerr         # never return nil after a non-nil error check
+    - durationcheck  # no nonsensical time.Duration math
+    - misspell
+
+  settings:
+    errcheck:
+      # Unchecked type assertions can panic: x.(T) must use the comma-ok form.
+      check-type-assertions: true
+      # No `_ =` either: every returned error must be handled, even if only wrapped.
+      check-blank: true
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # struct byte-packing churn, not a correctness issue
+    gosec:
+      excludes:
+        - G104 # duplicates errcheck
+
+  exclusions:
+    generated: lax
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

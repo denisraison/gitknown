@@ -1,0 +1,7 @@
+/gitknown
+/web/node_modules
+.direnv/
+
+# Generated frontend build. The Go binary embeds it via //go:embed at build
+# time, so `just build` (which runs `npm run build`) must run before `go build`.
+/web/dist

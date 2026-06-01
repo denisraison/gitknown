@@ -1,0 +1,209 @@
+:root {
+  --bg: #0d1117;
+  --bg-2: #161b22;
+  --fg: #e6edf3;
+  --fg-muted: #8b949e;
+  --border: #30363d;
+  --accent: #2f81f7;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font:
+    13px/1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 280px 280px 1fr;
+  height: 100%;
+}
+
+.repos,
+.tree-pane {
+  border-right: 1px solid var(--border);
+  overflow: auto;
+}
+
+.repos {
+  background: var(--bg-2);
+}
+
+.repos-top {
+  position: sticky;
+  top: 0;
+  background: var(--bg-2);
+}
+
+.repos-header {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.count {
+  color: var(--fg);
+}
+
+.repos-filter {
+  display: block;
+  width: 100%;
+  padding: 7px 12px;
+  background: var(--bg);
+  border: none;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+
+.repos-filter::placeholder {
+  color: var(--fg-muted);
+}
+
+.repos-filter:focus {
+  box-shadow: inset 0 -1px 0 var(--accent);
+}
+
+.repos-empty {
+  padding: 12px;
+  color: var(--fg-muted);
+}
+
+.repo {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+}
+
+.repo:hover {
+  background: #1c2128;
+}
+
+.repo.active {
+  background: #1f6feb22;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.repo-name {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.repo-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.badge {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 10px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+.ahead {
+  color: #3fb950;
+}
+
+.repo-branch {
+  color: var(--fg-muted);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.tree-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* the body scrolls, not the pane (keeps the head fixed) */
+}
+
+.tree-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+}
+
+.tree-toggle {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.tree-toggle.active {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+.tree-note {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.tree-body {
+  flex: 1;
+  overflow: auto;
+  padding: 6px;
+}
+
+.diff-wrap {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.diff-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+
+.diff-pane {
+  flex: 1;
+  overflow: auto;
+}
+
+.empty {
+  margin: auto;
+  color: var(--fg-muted);
+}

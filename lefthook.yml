@@ -1,0 +1,34 @@
+# Git hooks, managed by lefthook. Install once: `just install-hooks`.
+# Commit stays fast: lint/format/typecheck run in parallel, scoped to staged
+# files. The heavy full build + tests run on push (and via `just verify`).
+# Bypass once with: LEFTHOOK=0 git commit  (or `git commit --no-verify`).
+
+pre-commit:
+  parallel: true
+  commands:
+    # Whole-module lint (govet + staticcheck + errcheck + gosec + gofmt check).
+    # Gated on a staged .go file; golangci-lint is fast enough to run on all.
+    lint-go:
+      glob: "*.go"
+      run: golangci-lint run ./...
+    # oxlint only the staged frontend files.
+    lint-fe:
+      root: "web/"
+      glob: "*.{ts,tsx}"
+      run: npx oxlint --deny-warnings {staged_files}
+    # oxfmt formatting check on the staged frontend files.
+    fmt-fe:
+      root: "web/"
+      glob: "*.{ts,tsx,css,html,js,mjs,json}"
+      run: npx oxfmt --check {staged_files}
+    # Typecheck is project-wide (tsc has no useful per-file mode); gate it on a
+    # staged .ts/.tsx so it only runs when frontend code changed.
+    typecheck-fe:
+      root: "web/"
+      glob: "*.{ts,tsx}"
+      run: npx tsc --noEmit
+
+pre-push:
+  commands:
+    verify:
+      run: just verify
