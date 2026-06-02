@@ -289,9 +289,49 @@ body {
 }
 
 .diff-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   color: var(--fg-muted);
+}
+
+.diff-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-controls {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.diff-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 8px;
+  text-transform: lowercase;
+}
+
+.diff-toggle:hover {
+  color: var(--fg);
+  border-color: var(--fg-muted);
+}
+
+.diff-toggle.on {
+  color: var(--fg);
+  border-color: var(--accent);
 }
 
 .diff-pane {

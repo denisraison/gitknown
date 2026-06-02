@@ -34,6 +34,23 @@ export function App() {
   const storedWidth = Number(localStorage.getItem("gk.treeWidth"));
   const [treeWidth, setTreeWidth] = createSignal(storedWidth >= 180 ? storedWidth : 280);
 
+  // Diff viewer preferences (split vs unified, line wrap). Global, not per-tab,
+  // and layout-ish, so they live in localStorage like treeWidth, not the URL.
+  const [diffStyle, setDiffStyle] = createSignal<"split" | "unified">(
+    localStorage.getItem("gk.diffStyle") === "unified" ? "unified" : "split",
+  );
+  const [wrap, setWrap] = createSignal(localStorage.getItem("gk.wrap") === "1");
+  const toggleDiffStyle = () => {
+    const next = diffStyle() === "split" ? "unified" : "split";
+    setDiffStyle(next);
+    localStorage.setItem("gk.diffStyle", next);
+  };
+  const toggleWrap = () => {
+    const next = !wrap();
+    setWrap(next);
+    localStorage.setItem("gk.wrap", next ? "1" : "0");
+  };
+
   // Window-level listeners (not pointer capture on the bar) so a fast drag never
   // outruns the divider.
   const startResize = (e: PointerEvent) => {
@@ -202,21 +219,24 @@ export function App() {
       setRepos(list);
       restoreFromURL(list);
     });
-    // On a disk change, refresh counts and prune tabs whose repo vanished (e.g. a
-    // removed worktree); the open tab's diff pane re-fetches itself.
+    // On a disk change, refresh counts and prune tabs whose repo left the
+    // sidebar: either it vanished (removed worktree) or it went clean (no longer
+    // dirty). Key off the dirty set, NOT the query-filtered visible() set, so
+    // typing a filter never closes tabs. The kept tab's diff pane re-fetches
+    // itself.
     const unsub = subscribeChanges(
       (changedId) => {
         loadRepos().then(() => {
-          const live = new Set(repos().map((r) => r.id));
-          if (tabs().some((t) => !live.has(t.id))) {
-            const kept = tabs().filter((t) => live.has(t.id));
+          const shown = new Set(dirty().map((r) => r.id));
+          if (tabs().some((t) => !shown.has(t.id))) {
+            const kept = tabs().filter((t) => shown.has(t.id));
             setTabs(kept);
-            if (activeId() && !live.has(activeId()!)) {
+            if (activeId() && !shown.has(activeId()!)) {
               setActiveId(kept[0]?.id);
             }
             updateURL();
           }
-          if (live.has(changedId) && tabs().some((t) => t.id === changedId)) {
+          if (shown.has(changedId) && tabs().some((t) => t.id === changedId)) {
             loadFiles(changedId);
           }
         });
@@ -331,8 +351,34 @@ export function App() {
 
           <main class="diff-wrap">
             <Show when={active()?.file} fallback={<div class="empty">select a file</div>}>
-              <div class="diff-header">{active()!.file!.path}</div>
-              <DiffPane repoId={activeId()} file={active()!.file} />
+              <div class="diff-header">
+                <span class="diff-path">{active()!.file!.path}</span>
+                <div class="diff-controls">
+                  <button
+                    class="diff-toggle"
+                    classList={{ on: wrap() }}
+                    title="toggle line wrap"
+                    onClick={toggleWrap}
+                  >
+                    wrap
+                  </button>
+                  <Show when={active()!.file!.status !== ""}>
+                    <button
+                      class="diff-toggle"
+                      title="toggle unified / split view"
+                      onClick={toggleDiffStyle}
+                    >
+                      {diffStyle()}
+                    </button>
+                  </Show>
+                </div>
+              </div>
+              <DiffPane
+                repoId={activeId()}
+                file={active()!.file}
+                diffStyle={diffStyle()}
+                wrap={wrap()}
+              />
             </Show>
           </main>
         </div>
