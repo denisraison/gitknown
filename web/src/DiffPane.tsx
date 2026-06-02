@@ -4,9 +4,41 @@ import { fetchFileDiff, fetchFileView, type FileEntry } from "./api";
 
 const THEME = { dark: "pierre-dark", light: "pierre-light" };
 
-// DiffPane wraps the imperative @pierre/diffs viewers. Solid components run once,
-// so we own the instance directly: rebuild it when the target file changes,
-// clean it up on unmount. No reconciliation fights the widget.
+export interface MountDiffArgs {
+  path: string;
+  status: string;
+  oldContents: string;
+  newContents: string;
+  diffStyle: "split" | "unified";
+  overflow: "wrap" | "scroll";
+}
+
+// mountDiff renders one file into a container with the imperative @pierre/diffs
+// viewers and returns the instance for cleanup. Empty status = an unchanged context
+// file (from "all files" mode): no diff, so use the plain File viewer; routing it
+// through FileDiff with identical sides produces zero hunks and shows nothing.
+// Shared by DiffPane (single-file) and StackedDiffPane (one per stacked row).
+export function mountDiff(container: HTMLElement, args: MountDiffArgs): File | FileDiff {
+  if (args.status === "") {
+    const f = new File({ theme: THEME, overflow: args.overflow });
+    f.render({
+      file: { name: args.path, contents: args.newContents },
+      containerWrapper: container,
+    });
+    return f;
+  }
+  const fd = new FileDiff({ theme: THEME, diffStyle: args.diffStyle, overflow: args.overflow });
+  fd.render({
+    oldFile: { name: args.path, contents: args.oldContents },
+    newFile: { name: args.path, contents: args.newContents },
+    containerWrapper: container,
+  });
+  return fd;
+}
+
+// DiffPane wraps the imperative viewers for the single-file view. Solid components
+// run once, so we own the instance directly: rebuild it when the target file
+// changes, clean it up on unmount. No reconciliation fights the widget.
 export function DiffPane(props: {
   repoId?: string | undefined;
   file?: FileEntry | undefined;
@@ -28,30 +60,20 @@ export function DiffPane(props: {
       instance = undefined;
       return;
     }
-    // Empty status = an unchanged context file (from "all files" mode): there is
-    // no diff, so render it with the plain File viewer. Routing it through
-    // FileDiff with identical old/new produces zero hunks and shows nothing.
-    if (file.status === "") {
-      fetchFileView(repoId, file.path).then((d) => {
-        instance?.cleanUp();
-        const f = new File({ theme: THEME, overflow });
-        f.render({
-          file: { name: file.path, contents: d.newContents },
-          containerWrapper: container,
-        });
-        instance = f;
-      });
-      return;
-    }
-    fetchFileDiff(repoId, file.path, file.status).then((d) => {
+    const fetcher =
+      file.status === ""
+        ? fetchFileView(repoId, file.path)
+        : fetchFileDiff(repoId, file.path, file.status);
+    fetcher.then((d) => {
       instance?.cleanUp();
-      const fd = new FileDiff({ theme: THEME, diffStyle, overflow });
-      fd.render({
-        oldFile: { name: file.path, contents: d.oldContents },
-        newFile: { name: file.path, contents: d.newContents },
-        containerWrapper: container,
+      instance = mountDiff(container, {
+        path: file.path,
+        status: file.status,
+        oldContents: d.oldContents,
+        newContents: d.newContents,
+        diffStyle,
+        overflow,
       });
-      instance = fd;
     });
   });
 

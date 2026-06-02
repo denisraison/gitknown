@@ -343,3 +343,81 @@ body {
   margin: auto;
   color: var(--fg-muted);
 }
+
+/* Stacked "files changed" view: one collapsible section per changed file. */
+.stacked-pane {
+  flex: 1;
+  overflow: auto;
+}
+
+.stack-file {
+  border-bottom: 1px solid var(--border);
+}
+
+/* Per-file header sticks while its diff scrolls; consecutive headers stack like
+   GitHub's files-changed list. */
+.stack-file-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.stack-file.viewed .stack-file-head {
+  background: #1b211b; /* faint green wash so viewed files read as "done" */
+}
+
+.stack-chevron {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.stack-chevron:hover {
+  color: var(--fg);
+}
+
+.stack-status {
+  flex-shrink: 0;
+  width: 1.2em;
+  text-align: center;
+  color: var(--fg-muted);
+}
+
+.stack-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.stack-file.viewed .stack-path {
+  color: var(--fg-muted);
+}
+
+.stack-viewed {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.stack-viewed input {
+  cursor: pointer;
+  margin: 0;
+}

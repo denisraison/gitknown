@@ -10,14 +10,17 @@ import {
 } from "./api";
 import { FileTreePane } from "./FileTreePane";
 import { DiffPane } from "./DiffPane";
+import { StackedDiffPane } from "./StackedDiffPane";
 
-// One open repo with its own view state; id is the repo id and the tab key.
+// One open repo with its own view state; id is the repo id and the tab key. rev is
+// bumped on each disk change so the stacked view re-fetches and re-hashes its diffs.
 interface Tab {
   id: string;
   files: FileEntry[];
   file?: FileEntry;
   showAll: boolean;
   tree?: RepoTree;
+  rev: number;
 }
 
 export function App() {
@@ -28,6 +31,22 @@ export function App() {
 
   const active = createMemo(() => tabs().find((t) => t.id === activeId()));
   const repoById = (id: string) => repos().find((r) => r.id === id);
+
+  // The set the stacked view renders. Changes-only by default; in "all files" mode
+  // it's the whole repo tree, changed files keeping their status (so they stack as
+  // diffs) and the rest as status "" (plain contents). Windowing keeps it cheap.
+  const stackFiles = createMemo<FileEntry[]>(() => {
+    const a = active();
+    if (!a) {
+      return [];
+    }
+    const all = a.showAll ? a.tree?.paths : undefined;
+    if (!all?.length) {
+      return a.files;
+    }
+    const byPath = new Map(a.files.map((f) => [f.path, f]));
+    return all.map((p) => byPath.get(p) ?? { path: p, status: "" });
+  });
 
   // Tree-pane width is a draggable preference: persist it in localStorage (not
   // the URL, which carries view state, not layout).
@@ -40,6 +59,7 @@ export function App() {
     localStorage.getItem("gk.diffStyle") === "unified" ? "unified" : "split",
   );
   const [wrap, setWrap] = createSignal(localStorage.getItem("gk.wrap") === "1");
+  const [stackAll, setStackAll] = createSignal(localStorage.getItem("gk.stack") === "1");
   const toggleDiffStyle = () => {
     const next = diffStyle() === "split" ? "unified" : "split";
     setDiffStyle(next);
@@ -49,6 +69,11 @@ export function App() {
     const next = !wrap();
     setWrap(next);
     localStorage.setItem("gk.wrap", next ? "1" : "0");
+  };
+  const toggleStack = () => {
+    const next = !stackAll();
+    setStackAll(next);
+    localStorage.setItem("gk.stack", next ? "1" : "0");
   };
 
   // Window-level listeners (not pointer capture on the bar) so a fast drag never
@@ -83,6 +108,11 @@ export function App() {
 
   const loadFiles = (id: string) => fetchFiles(id).then((fs) => patchTab(id, { files: fs }));
 
+  // bumpRev signals the stacked view that this repo changed on disk, so it re-fetches
+  // and re-hashes (a changed file then drops out of "viewed" and re-expands).
+  const bumpRev = (id: string) =>
+    setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, rev: t.rev + 1 } : t)));
+
   // replaceState (not pushState) so live updates don't spam history; a refresh
   // then restores exactly what's open.
   const updateURL = () => {
@@ -111,7 +141,7 @@ export function App() {
 
   const openRepo = (id: string) => {
     if (!tabs().some((t) => t.id === id)) {
-      setTabs((ts) => [...ts, { id, files: [], showAll: false }]);
+      setTabs((ts) => [...ts, { id, files: [], showAll: false, rev: 0 }]);
       loadFiles(id);
     }
     setActiveId(id);
@@ -130,12 +160,20 @@ export function App() {
     updateURL();
   };
 
+  // jump fires only on a real tree click (a deliberate navigation), never on URL
+  // restore, so the stacked view scrolls/expands the picked file without reopening
+  // a viewed file just because it's the restored ?file. n bumps so re-clicking the
+  // same path jumps again.
+  const [jump, setJump] = createSignal<{ path: string; n: number }>();
+  let jumpN = 0;
+
   const selectFile = (f: FileEntry) => {
     const id = activeId();
     if (!id) {
       return;
     }
     patchTab(id, { file: f });
+    setJump({ path: f.path, n: ++jumpN });
     updateURL();
   };
 
@@ -182,7 +220,7 @@ export function App() {
       return;
     }
 
-    setTabs(openIds.map((id) => ({ id, files: [], showAll: false })));
+    setTabs(openIds.map((id) => ({ id, files: [], showAll: false, rev: 0 })));
     const wantActive = wantRepo ? resolve(wantRepo) : undefined;
     const activeTarget = wantActive && openIds.includes(wantActive) ? wantActive : openIds[0];
     setActiveId(activeTarget);
@@ -238,6 +276,7 @@ export function App() {
           }
           if (shown.has(changedId) && tabs().some((t) => t.id === changedId)) {
             loadFiles(changedId);
+            bumpRev(changedId);
           }
         });
       },
@@ -245,7 +284,10 @@ export function App() {
       // the repo list and every open tab's files from scratch.
       () => {
         loadRepos();
-        tabs().forEach((t) => loadFiles(t.id));
+        tabs().forEach((t) => {
+          loadFiles(t.id);
+          bumpRev(t.id);
+        });
       },
     );
     onCleanup(unsub);
@@ -350,9 +392,13 @@ export function App() {
           <div class="resizer" onPointerDown={startResize} />
 
           <main class="diff-wrap">
-            <Show when={active()?.file} fallback={<div class="empty">select a file</div>}>
+            <Show when={active()} fallback={<div class="empty">select a repo</div>}>
               <div class="diff-header">
-                <span class="diff-path">{active()!.file!.path}</span>
+                <span class="diff-path">
+                  {stackAll()
+                    ? `${stackFiles().length} ${stackFiles().length === 1 ? "file" : "files"}`
+                    : (active()!.file?.path ?? "")}
+                </span>
                 <div class="diff-controls">
                   <button
                     class="diff-toggle"
@@ -362,7 +408,9 @@ export function App() {
                   >
                     wrap
                   </button>
-                  <Show when={active()!.file!.status !== ""}>
+                  {/* split applies to every stacked diff; in single mode it's only
+                      meaningful for an actual diff (status set, not a context file). */}
+                  <Show when={stackAll() || (active()!.file && active()!.file!.status !== "")}>
                     <button
                       class="diff-toggle"
                       title="toggle unified / split view"
@@ -371,14 +419,38 @@ export function App() {
                       {diffStyle()}
                     </button>
                   </Show>
+                  <button
+                    class="diff-toggle"
+                    classList={{ on: stackAll() }}
+                    title="stack all changed diffs"
+                    onClick={toggleStack}
+                  >
+                    stack
+                  </button>
                 </div>
               </div>
-              <DiffPane
-                repoId={activeId()}
-                file={active()!.file}
-                diffStyle={diffStyle()}
-                wrap={wrap()}
-              />
+              <Show
+                when={stackAll()}
+                fallback={
+                  <Show when={active()!.file} fallback={<div class="empty">select a file</div>}>
+                    <DiffPane
+                      repoId={activeId()}
+                      file={active()!.file}
+                      diffStyle={diffStyle()}
+                      wrap={wrap()}
+                    />
+                  </Show>
+                }
+              >
+                <StackedDiffPane
+                  repoId={activeId()!}
+                  files={stackFiles()}
+                  diffStyle={diffStyle()}
+                  wrap={wrap()}
+                  rev={active()!.rev}
+                  jumpTarget={jump}
+                />
+              </Show>
             </Show>
           </main>
         </div>
