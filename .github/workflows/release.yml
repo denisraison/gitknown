@@ -36,6 +36,29 @@ jobs:
           nix develop --command just build
           echo "built version: $(./gitknown --version)"
 
+      # The darwin build runs in the nix shell with cgo on (rjeczalik/notify
+      # links CoreServices/FSEvents), so Go's cgo net resolver links libresolv
+      # too, and the linker bakes nix's /nix/store/...-libresolv install name
+      # into the binary. That path only exists on machines with nix, so the
+      # tarball won't launch on a plain Mac. Repoint it to the system libresolv
+      # (served from the dyld shared cache, same as a non-nix `go build`) and
+      # re-sign, since install_name_tool invalidates the ad-hoc signature.
+      - name: Make darwin binary portable (strip nix store paths)
+        if: matrix.os == 'darwin'
+        run: |
+          old=$(otool -L gitknown | grep -o '/nix/store/[^ ]*libresolv[^ ]*\.dylib' || true)
+          if [ -n "$old" ]; then
+            install_name_tool -change "$old" /usr/lib/libresolv.9.dylib gitknown
+            codesign -f -s - gitknown
+          fi
+          # Gate: nothing under /nix/store may remain, or the tarball isn't portable.
+          if otool -L gitknown | grep -q /nix/store; then
+            echo "::error::darwin binary still references /nix/store:"
+            otool -L gitknown
+            exit 1
+          fi
+          ./gitknown --version
+
       - name: Package
         run: |
           name="gitknown-${GITHUB_REF_NAME}-${{ matrix.os }}-${{ matrix.arch }}"
