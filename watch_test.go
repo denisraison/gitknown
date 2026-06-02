@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -141,6 +145,64 @@ func TestWatchDropsRemovedRepo(t *testing.T) {
 	}
 }
 
+// TestWatchFallbackPollBroadcasts: the fallback poll re-fingerprints repos on
+// its own timer, so a change surfaces even if FSEvents never delivers it. We
+// can't suppress FSEvents in-process, so the debounce window is pushed past the
+// test's lifetime: the only timer that can fire is the poll, so a broadcast here
+// proves the poll path stands on its own.
+func TestWatchFallbackPollBroadcasts(t *testing.T) {
+	repo, st, h, ch := startWatchedCfg(t, watchConfig{debounce: time.Hour, poll: 100 * time.Millisecond})
+	defer h.remove(ch)
+
+	write(t, filepath.Join(repo, "added.txt"), "hi\n")
+
+	id, ok := recv(ch, recvTimeout)
+	if !ok {
+		t.Fatal("no broadcast from the fallback poll")
+	}
+	if want := st.repos()[0].ID; id != want {
+		t.Fatalf("poll broadcast id = %q, want %q", id, want)
+	}
+}
+
+// TestWatchHeartbeatLogs: with a heartbeat interval set, the watcher must log a
+// liveness line on its own, so a silently-stalled stream is diagnosable from the
+// logs. Debounce is pushed out so the heartbeat is the only timer in play.
+func TestWatchHeartbeatLogs(t *testing.T) {
+	var buf lockedBuffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	startWatchedCfg(t, watchConfig{debounce: time.Hour, heartbeat: 100 * time.Millisecond})
+
+	deadline := time.Now().Add(recvTimeout)
+	for !strings.Contains(buf.String(), "watcher alive") {
+		if time.Now().After(deadline) {
+			t.Fatalf("no heartbeat logged; got:\n%s", buf.String())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// lockedBuffer is a bytes.Buffer safe for the watcher goroutine to write while
+// the test reads.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // recvMatch waits up to total for a broadcast carrying want, tolerating (and
 // discarding) broadcasts for other repos in between.
 func recvMatch(ch chan string, want string, total time.Duration) bool {
@@ -164,6 +226,12 @@ func recvMatch(ch chan string, want string, total time.Duration) bool {
 // subscribes to the hub, and waits for the FSEvents watch to attach and the
 // baseline signature to be primed. Cancellation stops the watcher on cleanup.
 func startWatched(t *testing.T) (repo string, st *store, h *hub, ch chan string) {
+	// Event path only: heartbeat/poll off so these tests exercise FSEvents, not
+	// the backstops (a poll would otherwise mask a broken event path).
+	return startWatchedCfg(t, watchConfig{debounce: 50 * time.Millisecond})
+}
+
+func startWatchedCfg(t *testing.T, cfg watchConfig) (repo string, st *store, h *hub, ch chan string) {
 	t.Helper()
 	root := t.TempDir()
 	repo = filepath.Join(root, "repo")
@@ -178,7 +246,7 @@ func startWatched(t *testing.T) (repo string, st *store, h *hub, ch chan string)
 	ch = h.add()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	go watch(ctx, st, h, 50*time.Millisecond)
+	go watch(ctx, st, h, cfg)
 	time.Sleep(settleDelay)
 	return repo, st, h, ch
 }

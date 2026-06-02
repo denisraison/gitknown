@@ -30,6 +30,8 @@ func main() {
 	rootsArg := flag.String("roots", "", "comma-separated dirs to scan (default: cwd)")
 	webDir := flag.String("web", "", "serve frontend from this dir instead of the embedded build (dev)")
 	debounce := flag.Duration("debounce", 200*time.Millisecond, "coalesce window for filesystem change events")
+	heartbeat := flag.Duration("heartbeat", time.Minute, "watcher liveness log interval (0 disables)")
+	poll := flag.Duration("poll", time.Minute, "fallback re-scan interval, a safety net for when FSEvents goes silent (0 disables)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -45,7 +47,7 @@ func main() {
 
 	// Watcher: one recursive FSEvents watch per root pushes events the instant
 	// the filesystem changes; we map each path to its repo and broadcast.
-	go watch(context.Background(), st, h, *debounce)
+	go watch(context.Background(), st, h, watchConfig{debounce: *debounce, heartbeat: *heartbeat, poll: *poll})
 
 	a := &api{store: st, hub: h}
 	mux := http.NewServeMux()
@@ -61,6 +63,14 @@ func main() {
 	log.Fatal(srv.ListenAndServe())
 }
 
+// watchConfig tunes the watcher's timers. heartbeat and poll are optional
+// (0 disables each).
+type watchConfig struct {
+	debounce  time.Duration // coalesce window for bursts of FS events
+	heartbeat time.Duration // liveness log interval; proves the stream is alive
+	poll      time.Duration // fallback full re-fingerprint when FSEvents goes silent
+}
+
 // watch turns filesystem change events into repo-changed broadcasts. It places
 // one recursive FSEvents watch per root (kernel-coalesced, no per-directory
 // descriptors), maps each event path back to its repo, and debounces bursts:
@@ -69,7 +79,13 @@ func main() {
 // pushes update the ahead marker; never-tracked high-churn dirs are skipped. A
 // .git entry appearing outside every known repo triggers a rescan, so a repo
 // cloned/created (or a worktree added) while running is discovered live.
-func watch(ctx context.Context, st *store, h *hub, debounce time.Duration) {
+//
+// Two backstops guard the failure mode where FSEvents silently stops delivering
+// (sleep, a wedged stream) with the process still alive, so KeepAlive never
+// relaunches it and nothing is logged: a heartbeat logs liveness + recent event
+// counts so a stall is diagnosable, and a fallback poll re-fingerprints every
+// repo on its own timer so changes still surface (at poll latency) regardless.
+func watch(ctx context.Context, st *store, h *hub, cfg watchConfig) {
 	c := make(chan notify.EventInfo, 1024)
 	for _, root := range st.roots {
 		if err := notify.Watch(filepath.Join(realPath(root), "..."), c, notify.All); err != nil {
@@ -103,6 +119,16 @@ func watch(ctx context.Context, st *store, h *hub, debounce time.Duration) {
 		return ""
 	}
 
+	// events/broadcasts tally activity since the last heartbeat; the heartbeat
+	// logs and resets them. Funnel every broadcast through this counter so the
+	// heartbeat can report "saw N events, sent M broadcasts": file edits with
+	// events stuck at 0 mean the kernel stopped delivering.
+	var events, broadcasts int
+	broadcast := func(id string) {
+		broadcasts++
+		h.broadcast(id)
+	}
+
 	// last holds each repo's primed signature so the first real change is
 	// detected rather than swallowed as the baseline. primeNew primes any repo
 	// not yet seen and, when announce is set, broadcasts it so the UI picks up a
@@ -115,24 +141,61 @@ func watch(ctx context.Context, st *store, h *hub, debounce time.Duration) {
 			}
 			last[r.ID] = statusSignature(r.Path, r.Base)
 			if announce {
-				h.broadcast(r.ID)
+				broadcast(r.ID)
 			}
 		}
 	}
 	primeNew(false)
+
+	// syncRepo re-fingerprints one repo and broadcasts when its change set
+	// differs; it reports the repo gone when its working tree has vanished
+	// (worktree removed / repo deleted) so the caller can drop it before it
+	// lingers as a phantom. Shared by the debounced event path and the poll.
+	syncRepo := func(id string) (gone bool) {
+		r, ok := st.get(id)
+		if !ok {
+			return false
+		}
+		if _, err := os.Stat(r.Path); err != nil {
+			return true
+		}
+		sig := statusSignature(r.Path, r.Base)
+		if last[id] != sig {
+			st.refreshOne(id)
+			broadcast(id)
+		}
+		last[id] = sig
+		return false
+	}
+	dropGone := func(gone []string) {
+		if len(gone) == 0 {
+			return
+		}
+		st.refresh()
+		rebuild()
+		for _, id := range gone {
+			delete(last, id)
+			broadcast(id)
+		}
+	}
 
 	gitSeg := pathSeg(".git")                      // "/.git/"  (a child path)
 	gitSuffix := string(os.PathSeparator) + ".git" // "/.git"   (the entry itself)
 
 	pending := map[string]bool{}
 	rescan := false
-	tick := time.NewTicker(debounce)
+	tick := time.NewTicker(cfg.debounce)
 	defer tick.Stop()
+	heartbeat := newOptionalTicker(cfg.heartbeat)
+	defer heartbeat.Stop()
+	poll := newOptionalTicker(cfg.poll)
+	defer poll.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case ev := <-c:
+			events++
 			p := ev.Path()
 			if skipWatch(p) {
 				continue
@@ -157,35 +220,47 @@ func watch(ctx context.Context, st *store, h *hub, debounce time.Duration) {
 			var gone []string
 			for id := range pending {
 				delete(pending, id)
-				r, ok := st.get(id)
-				if !ok {
-					continue
-				}
-				// The working tree vanished (worktree removed / repo deleted).
-				// Its own child-deletion events still map back to it via repoFor,
-				// so removal never trips the .git rescan gate above; without this
-				// it would linger as a phantom (stale count, empty tree). Drop it
-				// and nudge clients to reload the repo list.
-				if _, err := os.Stat(r.Path); err != nil {
+				if syncRepo(id) {
 					gone = append(gone, id)
-					continue
-				}
-				sig := statusSignature(r.Path, r.Base)
-				if last[id] != sig {
-					st.refreshOne(id)
-					h.broadcast(id)
-				}
-				last[id] = sig
-			}
-			if len(gone) > 0 {
-				st.refresh()
-				rebuild()
-				for _, id := range gone {
-					delete(last, id)
-					h.broadcast(id)
 				}
 			}
+			dropGone(gone)
+		case <-poll.C:
+			// Backstop for a silently-dead FSEvents stream: re-fingerprint every
+			// known repo so edits still surface even when no event ever arrived.
+			// In the healthy case the signatures match and nothing broadcasts.
+			var gone []string
+			for _, r := range st.repos() {
+				if syncRepo(r.ID) {
+					gone = append(gone, r.ID)
+				}
+			}
+			dropGone(gone)
+		case <-heartbeat.C:
+			log.Printf("gitknown: watcher alive: %d events, %d broadcasts since last beat (repos=%d)", events, broadcasts, len(st.repos()))
+			events, broadcasts = 0, 0
 		}
+	}
+}
+
+// optionalTicker is a time.Ticker that may be disabled: when d <= 0 its C
+// channel stays nil, so the select arm reading it simply never fires.
+type optionalTicker struct {
+	t *time.Ticker
+	C <-chan time.Time
+}
+
+func newOptionalTicker(d time.Duration) optionalTicker {
+	if d <= 0 {
+		return optionalTicker{}
+	}
+	t := time.NewTicker(d)
+	return optionalTicker{t: t, C: t.C}
+}
+
+func (o optionalTicker) Stop() {
+	if o.t != nil {
+		o.t.Stop()
 	}
 }
 
