@@ -11,12 +11,13 @@ function sameFiles(a: FileEntry[], b: FileEntry[]): boolean {
   return a.every((x, i) => x.path === b[i]?.path && x.status === b[i]?.status);
 }
 
-// changedDirs collects every ancestor directory of the changed files, so "all
-// files" mode can start collapsed yet expand the folders that contain changes.
-function changedDirs(files: FileEntry[]): string[] {
+// ancestorDirs collects every directory path that appears in the given file
+// paths (each path's ancestors). Used to seed "all files" expansion and to walk
+// a folder's descendants when folding it.
+function ancestorDirs(paths: string[]): string[] {
   const dirs = new Set<string>();
-  for (const f of files) {
-    const parts = f.path.split("/");
+  for (const p of paths) {
+    const parts = p.split("/");
     parts.pop();
     let acc = "";
     for (const part of parts) {
@@ -26,6 +27,10 @@ function changedDirs(files: FileEntry[]): string[] {
   }
   return [...dirs];
 }
+
+// changedDirs is the ancestor set of the changed files, so "all files" mode can
+// start collapsed yet expand the folders that contain changes.
+const changedDirs = (files: FileEntry[]): string[] => ancestorDirs(files.map((f) => f.path));
 
 // Wraps the imperative @pierre/trees core. "all files" mode shows the whole repo
 // with changed files badged; its unchanged files carry status "" so the caller
@@ -40,6 +45,7 @@ export function FileTreePane(props: {
 }) {
   let container!: HTMLDivElement;
   let tree: FileTree | undefined;
+  let unsub: (() => void) | undefined;
   let last: { files: FileEntry[]; all: string[] | undefined; showAll: boolean } | undefined;
 
   createEffect(() => {
@@ -55,6 +61,8 @@ export function FileTreePane(props: {
     }
     last = { files, all, showAll };
     const useAll = showAll && !!all && all.length > 0;
+    unsub?.();
+    unsub = undefined;
     tree?.cleanUp();
 
     const changed = new Map(files.map((f) => [f.path, f]));
@@ -88,9 +96,69 @@ export function FileTreePane(props: {
       },
     });
     tree.render({ fileTreeContainer: container });
+
+    // Folding a folder should fold everything inside it, so re-expanding it shows
+    // its children collapsed, not the deep state you left behind. The widget keeps
+    // a descendant's expansion across a parent collapse and exposes no expand/
+    // collapse event, so we diff expansion on the generic change listener: any
+    // directory we last saw open that's now closed gets its descendant directories
+    // collapsed too. Search is skipped — the widget collapses/restores expansion
+    // internally then, and those aren't user folds.
+    const view = tree;
+    const dirs = ancestorDirs(paths);
+    const openDirs = new Set<string>();
+    let syncing = false;
+    let prevSearching = false;
+    const currentlyOpen = () => {
+      const open = new Set<string>();
+      for (const d of dirs) {
+        const h = view.getItem(d);
+        if (h && "isExpanded" in h && h.isExpanded()) {
+          open.add(d);
+        }
+      }
+      return open;
+    };
+    unsub = view.subscribe(() => {
+      if (syncing) {
+        return;
+      }
+      const open = currentlyOpen();
+      const searching = view.isSearchOpen() || view.getSearchValue().length > 0;
+      // Skip the clear-search emit too (prevSearching): the widget restores
+      // expansion then, and that restore isn't a user fold.
+      if (!searching && !prevSearching) {
+        const folded = [...openDirs].filter((d) => !open.has(d));
+        if (folded.length > 0) {
+          syncing = true;
+          for (const parent of folded) {
+            const prefix = `${parent}/`;
+            for (const d of dirs) {
+              if (!d.startsWith(prefix)) {
+                continue;
+              }
+              const h = view.getItem(d);
+              if (h && "isExpanded" in h && h.isExpanded()) {
+                h.collapse();
+                open.delete(d);
+              }
+            }
+          }
+          syncing = false;
+        }
+      }
+      prevSearching = searching;
+      openDirs.clear();
+      for (const d of open) {
+        openDirs.add(d);
+      }
+    });
   });
 
-  onCleanup(() => tree?.cleanUp());
+  onCleanup(() => {
+    unsub?.();
+    tree?.cleanUp();
+  });
 
   return (
     <div class="pane tree-pane">
