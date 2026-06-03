@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -41,6 +42,65 @@ func TestDiscoverReposFindsLinkedWorktree(t *testing.T) {
 	}
 	if len(repos) != 4 {
 		t.Fatalf("discoverRepos: got %d repos, want 4: %+v", len(repos), repos)
+	}
+}
+
+// TestResolveBaseUntrackedBranchHidesCommittedWork is the regression guard for
+// the bug a user hit: a feature branch with no resolvable upstream (its
+// remote-tracking ref isn't present locally) used to fall back to origin/main,
+// so the branch's whole committed history showed as "changed" forever even with
+// a clean working tree. With no upstream the base is now HEAD, so only
+// uncommitted changes show; committed work stays hidden until it's pushable.
+func TestResolveBaseUntrackedBranchHidesCommittedWork(t *testing.T) {
+	repo := t.TempDir()
+	mustGitRepo(t, repo)
+	runGit(t, repo, "checkout", "-q", "-b", "feature")
+	write(t, filepath.Join(repo, "feature.txt"), "work\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-q", "-m", "feature work")
+
+	r, ok := loadRepo(repo, repo)
+	if !ok {
+		t.Fatal("loadRepo failed")
+	}
+	if r.BaseLabel != "working tree" {
+		t.Fatalf("base = %q, want HEAD fallback for an untracked branch", r.BaseLabel)
+	}
+	if r.Dirty || r.ChangedFiles != 0 || r.Ahead != 0 {
+		t.Fatalf("clean untracked branch shows committed work: dirty=%v changed=%d ahead=%d", r.Dirty, r.ChangedFiles, r.Ahead)
+	}
+
+	// An uncommitted edit must still surface.
+	write(t, filepath.Join(repo, "feature.txt"), "more\n")
+	if r, _ = loadRepo(repo, repo); !r.Dirty || r.ChangedFiles != 1 {
+		t.Fatalf("uncommitted edit not shown: dirty=%v changed=%d", r.Dirty, r.ChangedFiles)
+	}
+}
+
+// TestResolveBaseTrackedBranchShowsUnpushed: a branch tracking a remote diffs
+// against that upstream, so an unpushed commit (and its files) shows as the
+// change set, and Ahead counts it.
+func TestResolveBaseTrackedBranchShowsUnpushed(t *testing.T) {
+	remote := t.TempDir()
+	runGit(t, remote, "init", "-q", "--bare")
+	repo := t.TempDir()
+	mustGitRepo(t, repo)
+	runGit(t, repo, "remote", "add", "origin", remote)
+	runGit(t, repo, "push", "-q", "-u", "origin", "HEAD")
+
+	write(t, filepath.Join(repo, "next.txt"), "x\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-q", "-m", "unpushed")
+
+	r, ok := loadRepo(repo, repo)
+	if !ok {
+		t.Fatal("loadRepo failed")
+	}
+	if !strings.HasPrefix(r.BaseLabel, "origin/") {
+		t.Fatalf("base = %q, want the branch upstream", r.BaseLabel)
+	}
+	if r.Ahead != 1 || r.ChangedFiles != 1 || !r.Dirty {
+		t.Fatalf("unpushed commit not shown: ahead=%d changed=%d dirty=%v", r.Ahead, r.ChangedFiles, r.Dirty)
 	}
 }
 
