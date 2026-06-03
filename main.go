@@ -40,6 +40,12 @@ func main() {
 		return
 	}
 
+	// Keep a self-managed install current with GitHub releases, applied on the
+	// next start. Inert for nix/dev builds and opt-out via GITKNOWN_NO_AUTOUPDATE.
+	if os.Getenv("GITKNOWN_NO_AUTOUPDATE") == "" {
+		go autoUpdate(context.Background(), updateConfig{dir: defaultUpdateDir(), current: version})
+	}
+
 	roots := splitRoots(*rootsArg)
 	st := newStore(roots)
 	h := newHub()
