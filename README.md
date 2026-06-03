@@ -2,13 +2,20 @@
 
 [![CI](https://github.com/denisraison/gitknown/actions/workflows/ci.yml/badge.svg)](https://github.com/denisraison/gitknown/actions/workflows/ci.yml)
 
-One web page that aggregates uncommitted + unpushed git changes across every
-repo and worktree under a set of roots, so you can review work-in-progress
-(e.g. what Claude Code is doing across many checkouts) on the fly, before any
-of it becomes a PR.
+## Why
+
+You end up with a lot of worktrees. Agents (Claude Code and friends) churn
+across many checkouts at once, and `git status` one-repo-at-a-time doesn't
+scale: you lose track of which tree has uncommitted edits, which has unpushed
+commits, and what any of it actually changed before it turns into a PR.
+
+gitknown is one local web page that aggregates the **uncommitted + unpushed**
+work across every repo and worktree under a set of roots, live, so you can see
+and review all of it in one place. It's read-only and binds to localhost: a
+review surface, not a git client.
 
 Single Go binary: it embeds the built frontend and serves the API from the same
-process. Bind to localhost only.
+process.
 
 ## What it shows
 
@@ -27,10 +34,20 @@ process. Bind to localhost only.
 
 ## Change scope
 
-Per repo it diffs against the **merge-base** (fork point) of HEAD and the
-branch's upstream — or `origin/main`/`master` when there's no upstream. That
-means you see everything *this* branch added (unpushed commits + staged +
-unstaged + untracked) and never changes the base advanced past you.
+The point is to show *your* in-flight work, not your branch's whole history.
+So per repo:
+
+- **Branch with an upstream** → diff against the **merge-base** (fork point) of
+  HEAD and that upstream. You see everything this branch added that the remote
+  doesn't have (unpushed commits + staged + unstaged + untracked), and the base
+  never moves when the remote advances past you.
+- **No resolvable upstream** (never pushed, or its remote-tracking ref isn't
+  present locally) → base is **HEAD**, so only uncommitted work shows; committed
+  work stays hidden until the branch has somewhere to push.
+
+It deliberately never falls back to `origin/main`. Diffing a feature branch
+against a different branch surfaces its entire committed history as "changed"
+forever, which is exactly the noise we're trying to cut.
 
 ## Install
 
@@ -117,7 +134,11 @@ Commit/push from inside the dev shell (direnv loads it) so the tools are on
 - `git.go` — repo/worktree discovery, base resolution, status, diff
 - `server.go` — JSON + SSE handlers, repo store, event hub
 - `main.go` — flags, embedded static serving, filesystem watcher
+- `update.go` — self-managed install detection + GitHub-release autoupdater
 - `web/` — Solid + TypeScript frontend wrapping the two Pierre vanilla cores
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces fit together (the data
+flow, the watcher, the change fingerprint, the self-updater).
 
 ## Known rough edges (v1)
 
