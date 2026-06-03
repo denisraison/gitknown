@@ -129,21 +129,19 @@ func loadRepo(path, root string) (Repo, bool) {
 	return r, true
 }
 
-// resolveBase picks the ref to diff against and returns its merge-base with
-// HEAD (the fork point). Diffing against the fork point, not the ref's tip,
-// means we only ever show what *this* branch added, never changes the base
-// advanced past us. Prefers the branch's upstream, else a default branch.
+// resolveBase picks the ref to diff against so the change set is exactly this
+// branch's uncommitted + unpushed work. It uses the branch's upstream and
+// returns its merge-base with HEAD (the fork point), so the diff is what HEAD
+// has that the remote doesn't, never commits the remote advanced past us. With
+// no resolvable upstream (a branch never pushed, or whose remote-tracking ref
+// isn't present locally) it falls back to HEAD: only uncommitted changes show.
+// It deliberately does NOT fall back to origin/main or master, because diffing a
+// feature branch against a *different* branch surfaces its whole committed
+// history as "changed" forever, which is never what we want to show.
 func resolveBase(path string) (ref, label string) {
-	var cands []string
 	if up := strings.TrimSpace(git(path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")); up != "" {
-		cands = append(cands, up)
-	}
-	cands = append(cands, "origin/HEAD", "origin/main", "origin/master", "main", "master")
-	for _, cand := range cands {
-		if sha := strings.TrimSpace(git(path, "rev-parse", "--verify", "--quiet", cand)); sha != "" {
-			if mb := strings.TrimSpace(git(path, "merge-base", "HEAD", cand)); mb != "" {
-				return mb, cand
-			}
+		if mb := strings.TrimSpace(git(path, "merge-base", "HEAD", up)); mb != "" {
+			return mb, up
 		}
 	}
 	if head := strings.TrimSpace(git(path, "rev-parse", "--verify", "--quiet", "HEAD")); head != "" {
