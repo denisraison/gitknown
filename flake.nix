@@ -75,15 +75,15 @@
         # release; `just release-hashes v<X.Y.Z>` regenerates the values for a
         # manual fix. Only the platforms the release targets appear; others fall
         # back to the source build above.
-        binVersion = "0.3.4";
+        binVersion = "0.3.5";
         binAssets = {
           x86_64-linux = {
             arch = "linux-amd64";
-            sha256 = "a75991cd1999ba5919c1f4eb4a8cd163f6b4ebbfebc297f5bdd5316b2f6e8fd0";
+            sha256 = "9a1fc9f8ba9d698801c71c27881ec4d0bdcdc292102830966b0bf4437dfd7a2e";
           };
           aarch64-darwin = {
             arch = "darwin-arm64";
-            sha256 = "dbf26a91413f892facc6659c8a7af422d88c2ec8bfaaf974922d3997d3cf56d5";
+            sha256 = "39bd2788b29fd09e5d318f4ee8a8ccf57b59cc12e9d66269c81c066bf5e7a665";
           };
         };
         binAsset = binAssets.${system} or null;
