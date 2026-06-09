@@ -145,6 +145,34 @@ func TestWatchDropsRemovedRepo(t *testing.T) {
 	}
 }
 
+// TestWatchPollRediscoversRepo is the regression guard for the bug this fixed:
+// a repo dropped out of the store while running (its base was momentarily
+// unresolvable during a git op, so discoverRepos skipped it on a rescan and the
+// store replaced its list without it) never came back. The only other rescan
+// trigger is a .git write outside every known repo, which an idle tree never
+// makes, so the repo lingered missing until a manual restart. The fallback poll
+// now re-runs discovery, so any repo present on disk is picked back up on its
+// own. Debounce is pushed past the test's life so the poll is the only timer
+// that can rediscover: a repo created after start (absent from the store, its
+// creation events never processed) standing in for one that dropped out.
+func TestWatchPollRediscoversRepo(t *testing.T) {
+	repo, st, h, ch := startWatchedCfg(t, watchConfig{debounce: time.Hour, poll: 100 * time.Millisecond})
+	defer h.remove(ch)
+	root := filepath.Dir(repo)
+
+	fresh := filepath.Join(root, "fresh")
+	mustGitRepo(t, fresh)
+	write(t, filepath.Join(fresh, "new.txt"), "hi\n")
+
+	want := idFor(fresh)
+	if !recvMatch(ch, want, recvTimeout) {
+		t.Fatal("repo on disk but absent from the store was not rediscovered by the poll")
+	}
+	if _, ok := st.get(want); !ok {
+		t.Fatalf("rediscovered repo %q absent from store", want)
+	}
+}
+
 // TestWatchFallbackPollBroadcasts: the fallback poll re-fingerprints repos on
 // its own timer, so a change surfaces even if FSEvents never delivers it. We
 // can't suppress FSEvents in-process, so the debounce window is pushed past the

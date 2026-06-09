@@ -235,6 +235,16 @@ func watch(ctx context.Context, st *store, h *hub, cfg watchConfig) {
 			// Backstop for a silently-dead FSEvents stream: re-fingerprint every
 			// known repo so edits still surface even when no event ever arrived.
 			// In the healthy case the signatures match and nothing broadcasts.
+			//
+			// Re-run discovery first so a repo that dropped out of the store
+			// (its base was momentarily unresolvable during a git op, so a
+			// rescan rebuilt the list without it) is picked back up: an idle
+			// tree never writes .git again to retrigger the event-path rescan,
+			// so the poll is its only way home. primeNew(true) announces any
+			// repo this brings back.
+			st.refresh()
+			rebuild()
+			primeNew(true)
 			var gone []string
 			for _, r := range st.repos() {
 				if syncRepo(r.ID) {
